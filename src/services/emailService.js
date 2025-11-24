@@ -7,20 +7,20 @@ require('dotenv').config();
 // CẤU HÌNH TRANSPORTER (ĐÃ FIX CHO RENDER.COM)
 // -------------------------------------------------------------
 const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false, // false cho port 587
+    service: 'gmail', 
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_APP_PASSWORD
     },
-    // THÊM CÁC DÒNG NÀY ĐỂ TRỊ BỆNH "CONNECTION TIMEOUT"
-    connectionTimeout: 20000, // Chờ 20 giây để kết nối (Mặc định có 2 giây)
-    greetingTimeout: 20000,   // Chờ 20 giây để nhận lời chào từ Gmail
-    socketTimeout: 20000,     // Chờ 20 giây không có dữ liệu mới ngắt
-    tls: {
-        rejectUnauthorized: false
-    }
+    // ⬇️ DÒNG QUAN TRỌNG FIX LỖI ⬇️
+    family: 4, // Ép dùng IPv4
+    pool: true, 
+    maxConnections: 1, 
+    rateLimit: 1, // Gửi chậm thôi để google không chặn
+    connectionTimeout: 30000,
+    greetingTimeout: 30000,
+    socketTimeout: 30000,
+    tls: { rejectUnauthorized: false }
 });
 
 // Kiểm tra kết nối khi khởi động server
