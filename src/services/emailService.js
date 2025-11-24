@@ -3,62 +3,67 @@
 const nodemailer = require('nodemailer');
 require('dotenv').config();
 
-// -------------------------------------------------------------
-// CẤU HÌNH TRANSPORTER (ĐÃ FIX CHO RENDER.COM)
-// -------------------------------------------------------------
+// ============================================================
+// CẤU HÌNH FIX LỖI CHO RENDER.COM
+// ============================================================
 const transporter = nodemailer.createTransport({
-    service: 'gmail', 
+    host: 'smtp.gmail.com', // Dùng host trực tiếp thay vì service 'gmail'
+    port: 587,              // Port chuẩn cho Cloud Server
+    secure: false,          // Port 587 đi với secure: false
     auth: {
         user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_APP_PASSWORD
+        pass: process.env.EMAIL_APP_PASSWORD // Hãy đảm bảo trên Render đã xóa dấu cách!
     },
-    // ⬇️ DÒNG QUAN TRỌNG FIX LỖI ⬇️
-    family: 4, // Ép dùng IPv4
-    pool: true, 
-    maxConnections: 1, 
-    rateLimit: 1, // Gửi chậm thôi để google không chặn
-    connectionTimeout: 30000,
-    greetingTimeout: 30000,
-    socketTimeout: 30000,
-    tls: { rejectUnauthorized: false }
-});
-
-// Kiểm tra kết nối khi khởi động server
-transporter.verify((error, success) => {
-    if (error) {
-        console.error('❌ EMAIL SERVICE ERROR: Không thể kết nối tới Gmail:', error.message);
-    } else {
-        console.log('✅ EMAIL SERVICE READY: Hệ thống gửi mail đã sẵn sàng (Port 587).');
+    // 🔥 "THẦN CHÚ" KHẮC PHỤC LỖI TIMEOUT 🔥
+    family: 4,              // Ép buộc dùng IPv4 (Fix lỗi ETIMEDOUT trên Render)
+    pool: true,             // Tái sử dụng kết nối giúp gửi nhanh hơn
+    maxConnections: 1,      // Giới hạn kết nối để không bị Gmail chặn
+    connectionTimeout: 10000, // 10 giây timeout
+    greetingTimeout: 10000,
+    tls: {
+        rejectUnauthorized: false // Bỏ qua lỗi chứng chỉ SSL nếu có
     }
 });
 
+// Kiểm tra kết nối ngay khi server khởi động
+transporter.verify((error, success) => {
+    if (error) {
+        console.error('❌ EMAIL CONNECTION ERROR (IPv4):', error.message);
+    } else {
+        console.log('✅ EMAIL SERVICE READY (Mode: IPv4 - Port 587)');
+    }
+});
+
+// Hàm gửi mail cơ bản (Core Function)
 const sendEmail = async (to, subject, htmlContent) => {
     try {
         const mailOptions = {
-            from: `"ENA Airlines Support" <${process.env.EMAIL_USER}>`,
+            from: `"ENA Airlines System" <${process.env.EMAIL_USER}>`,
             to: to,
             subject: subject,
             html: htmlContent
         };
-        await transporter.sendMail(mailOptions);
-        console.log(`✅ Đã gửi email thành công tới: ${to}`);
+        // Sử dụng await để đảm bảo mail gửi xong mới chạy tiếp
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`✅ Email sent to ${to} | ID: ${info.messageId}`);
     } catch (error) {
-        console.error('❌ Lỗi gửi email (Send Failed):', error);
-        // Lưu ý: Không ném lỗi (throw error) để tránh crash luồng đặt vé chính
+        console.error(`❌ Send Failed to ${to}:`, error.message);
     }
 };
 
 // ============================================================
-// EMAIL 1: XÁC NHẬN ĐẶT CHỖ (CHỜ DUYỆT - PENDING)
+// CÁC TEMPLATE GỬI MAIL (ĐÃ ĐƯỢC GIỮ NGUYÊN LOGIC CŨ CỦA BẠN)
 // ============================================================
+
+// 1. EMAIL PENDING
 const sendBookingPendingEmail = async (userEmail, bookingData, flightData) => {
     const subject = `✈️ Xác nhận đặt chỗ [${bookingData.bookingCode}] - Chờ xử lý`;
     const total = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(bookingData.totalAmount);
     
-    // Safety check để tránh lỗi nếu dữ liệu ghế bị thiếu
+    // Safety check dữ liệu
     const seatList = bookingData.bookedSeats && bookingData.bookedSeats.length > 0 
                      ? bookingData.bookedSeats.map(s => s.seatNumber).join(', ') 
-                     : 'Chưa chọn';
+                     : 'Chờ xếp chỗ';
     
     const departureTime = new Date(flightData.departureTime);
     const timeString = departureTime.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
@@ -88,12 +93,9 @@ const sendBookingPendingEmail = async (userEmail, bookingData, flightData) => {
     await sendEmail(userEmail, subject, html);
 };
 
-// ============================================================
-// EMAIL 2: VÉ ĐIỆN TỬ (THÀNH CÔNG - CONFIRMED)
-// ============================================================
+// 2. EMAIL SUCCESS
 const sendBookingSuccessEmail = async (userEmail, bookingData, flightData) => {
     const subject = `✅ VÉ ĐIỆN TỬ CỦA BẠN - Mã: ${bookingData.bookingCode}`;
-    
     const total = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(bookingData.totalAmount);
     
     const seatList = bookingData.bookedSeats && bookingData.bookedSeats.length > 0 
@@ -156,21 +158,15 @@ const sendBookingSuccessEmail = async (userEmail, bookingData, flightData) => {
     await sendEmail(userEmail, subject, html);
 };
 
-// ============================================================
-// EMAIL 3: HỦY VÉ & HOÀN TIỀN (AUTO REFUND)
-// ============================================================
+// 3. EMAIL USER CANCELLATION
 const sendBookingCancellationEmail = async (userEmail, bookingData) => {
     const subject = `💸 Xác nhận Hoàn tiền - Mã đặt chỗ [${bookingData.bookingCode}]`;
-
-    // TÍNH TOÁN SỐ LIỆU
     const total = bookingData.totalAmount || 0;
-    const refundRate = 0.85; // 85%
-    const feeRate = 0.15;    // 15%
-    
+    const refundRate = 0.85; 
+    const feeRate = 0.15;    
     const refundAmount = total * refundRate;
     const feeAmount = total * feeRate;
 
-    // Hàm format tiền nhanh
     const fmt = (num) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(num);
     const userName = bookingData.user ? bookingData.user.name : 'Bạn';
 
@@ -210,14 +206,11 @@ const sendBookingCancellationEmail = async (userEmail, bookingData) => {
             ENA Airlines Automated System
         </div>
     </div>`;
-
     await sendEmail(userEmail, subject, html);
 };
 
 
-// ============================================================
-// EMAIL 4: ADMIN HỦY VÉ (HOÀN TIỀN 100%)
-// ============================================================
+// 4. EMAIL ADMIN REJECT/CANCEL
 const sendAdminCancellationEmail = async (userEmail, bookingData) => {
     const subject = `⚠️ Thông báo: Đơn hàng [${bookingData.bookingCode}] đã bị hủy`;
     const total = bookingData.totalAmount || 0;
@@ -229,7 +222,7 @@ const sendAdminCancellationEmail = async (userEmail, bookingData) => {
         <div style="padding:30px;">
             <h2 style="color:#333;margin-top:0;">ĐƠN HÀNG BỊ HỦY</h2>
             <p>Xin chào <strong>${userName}</strong>,</p>
-            <p>Đơn đặt vé <strong>${bookingData.bookingCode}</strong> đã bị quản trị viên từ chối do vấn đề kỹ thuật hoặc xác minh.</p>
+            <p>Đơn đặt vé <strong>${bookingData.bookingCode}</strong> đã bị quản trị viên từ chối.</p>
             <div style="background:#fffbe6;border:1px solid #ffe58f;border-radius:8px;padding:20px;margin:25px 0;">
                 <h3 style="margin:0 0 15px 0;color:#d48806;font-size:16px;border-bottom:1px dashed #d48806;padding-bottom:10px;">
                     CHÍNH SÁCH BẢO VỆ (HOÀN 100%)
@@ -261,5 +254,6 @@ module.exports = {
     sendBookingPendingEmail, 
     sendBookingSuccessEmail, 
     sendBookingCancellationEmail, 
-    sendAdminCancellationEmail   
+    sendAdminCancellationEmail,
+    sendEmail // Export thêm cái này nếu cần debug
 };
