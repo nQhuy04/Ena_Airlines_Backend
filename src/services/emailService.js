@@ -3,14 +3,29 @@
 const nodemailer = require('nodemailer');
 require('dotenv').config();
 
+// -------------------------------------------------------------
+// CẤU HÌNH TRANSPORTER (ĐÃ FIX CHO RENDER.COM)
+// -------------------------------------------------------------
 const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',  // Sử dụng host trực tiếp
+    port: 587,               // FIX QUAN TRỌNG: Dùng port 587 (STARTTLS) thay vì 465
+    secure: false,           // Port 587 yêu cầu secure phải là false
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_APP_PASSWORD
     },
     tls: {
+        // Cho phép gửi từ server Cloud mà không bị chặn SSL
         rejectUnauthorized: false
+    }
+});
+
+// Kiểm tra kết nối khi khởi động server
+transporter.verify((error, success) => {
+    if (error) {
+        console.error('❌ EMAIL SERVICE ERROR: Không thể kết nối tới Gmail:', error.message);
+    } else {
+        console.log('✅ EMAIL SERVICE READY: Hệ thống gửi mail đã sẵn sàng (Port 587).');
     }
 });
 
@@ -23,9 +38,10 @@ const sendEmail = async (to, subject, htmlContent) => {
             html: htmlContent
         };
         await transporter.sendMail(mailOptions);
-        console.log(`✅ Email sent to ${to}`);
+        console.log(`✅ Đã gửi email thành công tới: ${to}`);
     } catch (error) {
-        console.error('❌ Error sending email:', error);
+        console.error('❌ Lỗi gửi email (Send Failed):', error);
+        // Lưu ý: Không ném lỗi (throw error) để tránh crash luồng đặt vé chính
     }
 };
 
@@ -35,7 +51,11 @@ const sendEmail = async (to, subject, htmlContent) => {
 const sendBookingPendingEmail = async (userEmail, bookingData, flightData) => {
     const subject = `✈️ Xác nhận đặt chỗ [${bookingData.bookingCode}] - Chờ xử lý`;
     const total = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(bookingData.totalAmount);
-    const seatList = bookingData.bookedSeats.map(s => s.seatNumber).join(', ');
+    
+    // Safety check để tránh lỗi nếu dữ liệu ghế bị thiếu
+    const seatList = bookingData.bookedSeats && bookingData.bookedSeats.length > 0 
+                     ? bookingData.bookedSeats.map(s => s.seatNumber).join(', ') 
+                     : 'Chưa chọn';
     
     const departureTime = new Date(flightData.departureTime);
     const timeString = departureTime.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
@@ -72,10 +92,15 @@ const sendBookingSuccessEmail = async (userEmail, bookingData, flightData) => {
     const subject = `✅ VÉ ĐIỆN TỬ CỦA BẠN - Mã: ${bookingData.bookingCode}`;
     
     const total = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(bookingData.totalAmount);
-    const seatList = bookingData.bookedSeats.map(s => s.seatNumber).join(', ');
+    
+    const seatList = bookingData.bookedSeats && bookingData.bookedSeats.length > 0 
+                     ? bookingData.bookedSeats.map(s => s.seatNumber).join(', ') 
+                     : 'N/A';
+                     
     const departureTime = new Date(flightData.departureTime);
     const timeString = departureTime.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
     const dateString = departureTime.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const userName = bookingData.user ? bookingData.user.name : 'Quý khách';
 
     const html = `
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;border:2px solid #28a745;border-radius:8px;overflow:hidden;">
@@ -112,7 +137,7 @@ const sendBookingSuccessEmail = async (userEmail, bookingData, flightData) => {
                 </tr>
                 <tr>
                     <td style="padding:15px;color:#666;">Khách hàng</td>
-                    <td style="padding:15px;font-weight:600;">${bookingData.user.name}</td>
+                    <td style="padding:15px;font-weight:600;">${userName}</td>
                 </tr>
             </table>
             
@@ -135,7 +160,7 @@ const sendBookingCancellationEmail = async (userEmail, bookingData) => {
     const subject = `💸 Xác nhận Hoàn tiền - Mã đặt chỗ [${bookingData.bookingCode}]`;
 
     // TÍNH TOÁN SỐ LIỆU
-    const total = bookingData.totalAmount;
+    const total = bookingData.totalAmount || 0;
     const refundRate = 0.85; // 85%
     const feeRate = 0.15;    // 15%
     
@@ -144,26 +169,21 @@ const sendBookingCancellationEmail = async (userEmail, bookingData) => {
 
     // Hàm format tiền nhanh
     const fmt = (num) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(num);
+    const userName = bookingData.user ? bookingData.user.name : 'Bạn';
 
     const html = `
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;border:1px solid #eee;border-radius:8px;overflow:hidden;">
-        
-        <!-- Header Màu Cam/Đỏ nhẹ báo hiệu sự thay đổi -->
         <div style="background:#ff4d4f;padding:25px;text-align:center;color:white;">
             <h2 style="margin:0;font-size:22px;">YÊU CẦU HỦY VÉ THÀNH CÔNG</h2>
             <p style="margin:5px 0 0;opacity:0.9;">Xác nhận hoàn tiền tự động</p>
         </div>
-
         <div style="padding:30px;">
-            <p>Xin chào <strong>${bookingData.user.name}</strong>,</p>
+            <p>Xin chào <strong>${userName}</strong>,</p>
             <p>Theo yêu cầu của bạn, chúng tôi đã tiến hành hủy đơn đặt vé <strong>${bookingData.bookingCode}</strong>.</p>
-            
-            <!-- Box thông tin hoàn tiền -->
             <div style="background:#fffbe6;border:1px solid #ffe58f;border-radius:8px;padding:20px;margin:25px 0;">
                 <h3 style="margin:0 0 15px 0;color:#d48806;font-size:16px;border-bottom:1px dashed #d48806;padding-bottom:10px;">
                     CHI TIẾT HOÀN TIỀN (REFUND)
                 </h3>
-                
                 <table style="width:100%;font-size:15px;color:#333;">
                     <tr>
                         <td style="padding:5px 0;color:#666;">Giá trị vé ban đầu:</td>
@@ -179,15 +199,9 @@ const sendBookingCancellationEmail = async (userEmail, bookingData) => {
                     </tr>
                 </table>
             </div>
-
             <div style="background:#f0f5ff;padding:15px;border-radius:5px;font-size:13px;color:#555;line-height:1.5;">
-                <strong>ℹ️ Thông tin quan trọng:</strong><br/>
-                Khoản tiền <strong>${fmt(refundAmount)}</strong> sẽ được tự động chuyển về phương thức thanh toán ban đầu của bạn (Thẻ ATM/Visa/Ví điện tử) trong vòng <strong>24 giờ làm việc</strong>.
+                Khoản tiền <strong>${fmt(refundAmount)}</strong> sẽ được chuyển về tài khoản trong 24h.
             </div>
-            
-            <p style="text-align:center;margin-top:30px;color:#999;font-size:12px;">
-                Nếu bạn không thực hiện yêu cầu này, vui lòng liên hệ ngay hotline 1900 1234 để được hỗ trợ khẩn cấp.
-            </p>
         </div>
         <div style="background:#fafafa;padding:15px;text-align:center;color:#ccc;font-size:12px;">
             ENA Airlines Automated System
@@ -198,38 +212,29 @@ const sendBookingCancellationEmail = async (userEmail, bookingData) => {
 };
 
 
-
-
 // ============================================================
 // EMAIL 4: ADMIN HỦY VÉ (HOÀN TIỀN 100%)
 // ============================================================
 const sendAdminCancellationEmail = async (userEmail, bookingData) => {
-    const subject = `⚠️ Thông báo quan trọng: Đơn hàng [${bookingData.bookingCode}] đã bị hủy`;
-    
-    const total = bookingData.totalAmount;
+    const subject = `⚠️ Thông báo: Đơn hàng [${bookingData.bookingCode}] đã bị hủy`;
+    const total = bookingData.totalAmount || 0;
     const fmt = (num) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(num);
+    const userName = bookingData.user ? bookingData.user.name : 'Bạn';
 
     const html = `
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;border:1px solid #eee;border-top:5px solid #d48806;">
         <div style="padding:30px;">
-            <h2 style="color:#333;margin-top:0;">ĐƠN HÀNG BỊ TỪ CHỐI / HỦY</h2>
-            <p>Xin chào <strong>${bookingData.user.name}</strong>,</p>
-            <p>Chúng tôi rất tiếc phải thông báo đơn đặt vé <strong>${bookingData.bookingCode}</strong> của bạn đã bị quản trị viên từ chối hoặc hủy bỏ do vấn đề xác minh.</p>
-            
-            <!-- Box thông tin hoàn tiền 100% -->
+            <h2 style="color:#333;margin-top:0;">ĐƠN HÀNG BỊ HỦY</h2>
+            <p>Xin chào <strong>${userName}</strong>,</p>
+            <p>Đơn đặt vé <strong>${bookingData.bookingCode}</strong> đã bị quản trị viên từ chối do vấn đề kỹ thuật hoặc xác minh.</p>
             <div style="background:#fffbe6;border:1px solid #ffe58f;border-radius:8px;padding:20px;margin:25px 0;">
                 <h3 style="margin:0 0 15px 0;color:#d48806;font-size:16px;border-bottom:1px dashed #d48806;padding-bottom:10px;">
-                    CHÍNH SÁCH BẢO VỆ KHÁCH HÀNG (HOÀN 100%)
+                    CHÍNH SÁCH BẢO VỆ (HOÀN 100%)
                 </h3>
-                
                 <table style="width:100%;font-size:15px;color:#333;">
                     <tr>
                         <td style="padding:5px 0;color:#666;">Giá trị vé đã thanh toán:</td>
                         <td style="padding:5px 0;text-align:right;font-weight:bold;">${fmt(total)}</td>
-                    </tr>
-                    <tr>
-                        <td style="padding:5px 0;color:#28a745;">Hãng hủy đơn:</td>
-                        <td style="padding:5px 0;text-align:right;color:#28a745;">Hoàn tiền 100%</td>
                     </tr>
                     <tr style="font-size:18px;">
                         <td style="padding-top:15px;font-weight:bold;color:#006ce4;">SỐ TIỀN HOÀN LẠI:</td>
@@ -237,9 +242,7 @@ const sendAdminCancellationEmail = async (userEmail, bookingData) => {
                     </tr>
                 </table>
             </div>
-
             <div style="background:#f0f5ff;padding:15px;border-radius:5px;font-size:13px;color:#555;line-height:1.5;">
-                Khoản tiền <strong>${fmt(total)}</strong> sẽ được hoàn về tài khoản của bạn trong vòng 24h. 
                 Chúng tôi chân thành xin lỗi về sự bất tiện này.
             </div>
         </div>
