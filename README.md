@@ -18,7 +18,6 @@
 
 ## 📂 Cấu Trúc Thư Mục
 
-```text
 ENA-AIRLINES-BACKEND/
 ├── src/
 │   ├── config/         # Cấu hình Database, biến môi trường
