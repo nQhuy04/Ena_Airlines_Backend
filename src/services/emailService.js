@@ -7,21 +7,24 @@ require('dotenv').config();
 // CẤU HÌNH FIX LỖI CHO RENDER.COM
 // ============================================================
 const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com', // Dùng host trực tiếp thay vì service 'gmail'
-    port: 587,              // Port chuẩn cho Cloud Server
-    secure: false,          // Port 587 đi với secure: false
+    host: 'smtp.gmail.com',
+    port: 465,              // Đổi sang Port 465
+    secure: true,           // Bắt buộc là TRUE khi dùng Port 465
     auth: {
         user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_APP_PASSWORD // Hãy đảm bảo trên Render đã xóa dấu cách!
+        pass: process.env.EMAIL_APP_PASSWORD
     },
-    // 🔥 "THẦN CHÚ" KHẮC PHỤC LỖI TIMEOUT 🔥
-    family: 4,              // Ép buộc dùng IPv4 (Fix lỗi ETIMEDOUT trên Render)
-    pool: true,             // Tái sử dụng kết nối giúp gửi nhanh hơn
-    maxConnections: 1,      // Giới hạn kết nối để không bị Gmail chặn
-    connectionTimeout: 10000, // 10 giây timeout
-    greetingTimeout: 10000,
+    // Vẫn giữ các cấu hình tối ưu mạng
+    family: 4,              // Ép dùng IPv4
+    pool: true,             // Giữ kết nối
+    maxConnections: 1,      // Giới hạn 1 kết nối
+    rateLimit: 1,           // 1 mail/giây
+    connectionTimeout: 60000, // Tăng lên 60s
+    greetingTimeout: 30000,
+    socketTimeout: 60000,
     tls: {
-        rejectUnauthorized: false // Bỏ qua lỗi chứng chỉ SSL nếu có
+        // Không check chứng chỉ
+        rejectUnauthorized: false
     }
 });
 
